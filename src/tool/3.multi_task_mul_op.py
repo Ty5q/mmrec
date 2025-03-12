@@ -12,7 +12,7 @@ from pymoo.interface import sample
 from pymoo.core.problem import Problem
 import numpy as np
 from pymoo.core.repair import Repair
-
+from Problems import *
 import copy
 
 
@@ -43,18 +43,6 @@ class Item:  # 每个物体的类
         self.true_num = true_num  # 物品在整个数据集里的真实编号
         self.acc_score = acc_score   # [第一个目标] gru 给该物体的序号，0最大，99最小，越小越好
         self.embed = embed
-
-
-def cal_div(real_rec_ind):
-    tmp_dict = {}
-    for i in range(cluster_sum):
-        tmp_dict[i] = 0
-    for i in real_rec_ind:
-        idx = item_meta_df.iloc[i - 1, 1:].to_numpy().nonzero()[0]
-        for t in idx:
-            tmp_dict[t] = 1
-    cnt = sum(1 for value in tmp_dict.values() if value == 1)
-    return cnt / cluster_sum
 
 
 def ini_pop(popsize=100):
@@ -105,30 +93,6 @@ def ini_pop(popsize=100):
             fit_list.append(fit)
     ini_res = pd.DataFrame(ini_dict).sort_values(by='user_id')
     return ini_res
-
-
-# 多目标优化
-# 定义优化问题
-class MyProblem(Problem):
-    def __init__(self, user_id, items, xl, xu, k=6):
-        super().__init__(n_var=k, n_obj=2, n_constr=0, xl=xl, xu=xu)
-        self.items = items
-        self.user_id = user_id
-
-    def _evaluate(self, x, out, *args, **kwargs):
-        F = []
-        for xi in x:
-            acc = 0
-            real_rec_ind = item_list[self.user_id - 1][xi]
-            # 计算diversity
-            diversity = cal_div(real_rec_ind)
-            for item_id in xi:
-                # acc
-                acc += self.items[item_id].acc_score
-            acc = acc / len(xi)
-            F.append([-diversity, acc])
-        out["F"] = np.array(F)
-        out["G"] = None
 
 
 def change(off1, off2, i):
@@ -238,6 +202,28 @@ def enviromentSelection_elitism(pop):
     return pop
 
 
+from pymoo.indicators.hv import Hypervolume
+def plot_hy(fit):
+    # 归一化
+    approx_ideal = np.array(fit).min(axis=0)
+    approx_nadir = np.array(fit).max(axis=0)
+    # hyper评估----帕累托解未知
+    metric = Hypervolume(ref_point=approx_nadir,
+                         norm_ref_point=False,
+                         zero_to_one=True,
+                         ideal=approx_ideal,
+                         nadir=approx_nadir)
+
+    hv = [metric.do(cur_fit) for cur_fit in fit]
+
+    plt.figure(figsize=(7, 5))
+    plt.scatter(range(len(hv)), hv, facecolor="none", edgecolor='black', marker="p")
+    plt.title("Convergence")
+    plt.xlabel("Function Evaluations")
+    plt.ylabel("Hypervolume")
+    plt.show()
+
+
 def pair_cross_mut(pop):
     # print("2.1开始交叉")
     # 随机选择用户序号
@@ -298,14 +284,16 @@ if __name__ == '__main__':
 
     # 读入数据集
     # embed, score = item_embed_pred["embedding"], item_embed_pred["prediction"]
-    dataset = 'ml-1m'   # 'ml-1m' 'Grocery_and_Gourmet_Food'
-    method = 'ContraRec'  # 'GRU4Rec' 'ComiRec' 'SLRCPlus' 'SASRec' 'ContraRec' 'TiSASRec' 'KDA' 'Caser' 'NARM'
+    dataset = 'ml-1m'   # 'ml-1m' 'Montana'
+    method = 'GRU4Rec'  # 'GRU4Rec' 'ComiRec' 'SLRCPlus' 'SASRec' 'ContraRec' 'TiSASRec' 'KDA' 'Caser' 'NARM'
     path = r'../../data/' + dataset
     dev_df = pd.read_csv(path + r'/dev.csv', sep='\t')
     test_df = pd.read_csv(path + r'/test.csv', sep='\t')
     item_meta_df = pd.read_csv(path + r'/item_meta.csv', sep='\t')
     train_df = pd.read_csv(path + r'/train1.csv', sep='\t')
 
+    # 计算项目流行度
+    p_dict = cal_p(pd.read_csv(path + r'/train.csv', sep='\t'))
     cluster_sum = item_meta_df.shape[1] - 1
     gru_pred_file = '../res_{}/{}_{}_pred.npz'.format(dataset, dataset, method)
     # gru 预测数据
@@ -344,7 +332,7 @@ if __name__ == '__main__':
 
     for k in n_var:
         center_pop_info = pd.read_csv(f'../res_{dataset}/{dataset}_{method}_moea_{k}_center_vec_2.csv', sep='\t')
-        filename = '../res_{}/{}_{}_moea_{}_test_vec_2_10_1.csv'.format(dataset, dataset, method, k)
+        filename = '../res_{}/{}_{}_moea_{}_test_vec_2_.csv'.format(dataset, dataset, method, k)
         start = time.time()
         # 为每个用户初始化种群
         print("1.开始初始化")
@@ -369,7 +357,7 @@ if __name__ == '__main__':
                 # environmentSelection
                 pop = enviromentSelection_elitism(pop)
                 # 判断是否达到中止条件（连续两代未改变）或者迭代达到30次
-                if is_break(hist_pop, pop) or gen == 10:
+                if is_break(hist_pop, pop) or gen == 30:
                     print("达到终止条件!")
                     break
                 gen += 1
