@@ -1,2 +1,3 @@
-emmr in "src/tool/EMMR-main"\n
+emmr in "src/tool/EMMR-main"
+
 MCGM-SR in "src/tool"
